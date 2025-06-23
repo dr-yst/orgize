@@ -207,15 +207,38 @@ fn headline_tags_node(input: Input) -> IResult<Input, GreenElement, ()> {
 }
 
 fn headline_keyword_token(input: Input) -> IResult<Input, (GreenElement, Input), ()> {
-    let (input, word) = take_while1(|c: char| !c.is_ascii_whitespace())(input)?;
-    let (input, ws) = space0(input)?;
-    if input.c.todo_keywords.0.iter().any(|k| k == word.s) {
-        Ok((input, (word.token(HEADLINE_KEYWORD_TODO), ws)))
-    } else if input.c.todo_keywords.1.iter().any(|k| k == word.s) {
-        Ok((input, (word.token(HEADLINE_KEYWORD_DONE), ws)))
-    } else {
-        Err(nom::Err::Error(()))
+    // Try to match any keyword (active or done) at this position, preferring longest
+    let mut matched: Option<(&str, bool)> = None;
+    let mut max_len = 0;
+    for kw in input.c.todo_keywords.0.iter() {
+        if input.s.starts_with(kw) && kw.len() > max_len {
+            let rest = &input.s[kw.len()..];
+            if rest.chars().next().map_or(true, |c| c.is_whitespace()) {
+                matched = Some((kw, true));
+                max_len = kw.len();
+            }
+        }
     }
+    for kw in input.c.todo_keywords.1.iter() {
+        if input.s.starts_with(kw) && kw.len() > max_len {
+            let rest = &input.s[kw.len()..];
+            if rest.chars().next().map_or(true, |c| c.is_whitespace()) {
+                matched = Some((kw, false));
+                max_len = kw.len();
+            }
+        }
+    }
+    if let Some((kw, is_todo)) = matched {
+        let (input, _) = input.take_split(kw.len());
+        let (input, ws) = space0(input)?;
+        let token_kind = if is_todo {
+            HEADLINE_KEYWORD_TODO
+        } else {
+            HEADLINE_KEYWORD_DONE
+        };
+        return Ok((input, (token(token_kind, kw), ws)));
+    }
+    Err(nom::Err::Error(()))
 }
 
 fn headline_priority_node(input: Input) -> IResult<Input, (GreenElement, Input), ()> {
